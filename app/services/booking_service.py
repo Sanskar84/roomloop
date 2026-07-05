@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, date
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from typing import Optional
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
 
@@ -44,7 +45,6 @@ def check_conflict(
     )
     if exclude_series_id is not None:
         # SQL `!=` drops NULL rows, so we must explicitly keep them (single bookings have series_id=NULL)
-        from sqlalchemy import or_
         query = query.filter(
             or_(Booking.series_id == None, Booking.series_id != exclude_series_id)  # noqa: E711
         )
@@ -122,6 +122,13 @@ def create_recurring_booking(
         raise HTTPException(status_code=422, detail="start_time must be before end_time")
     if start_naive.date() > repeat_until:
         raise HTTPException(status_code=422, detail="First occurrence is after repeat_until")
+    if end_naive - start_naive > timedelta(weeks=1):
+        # occurrences are 1 week apart, so a longer duration would make the
+        # series' own instances overlap each other
+        raise HTTPException(
+            status_code=422,
+            detail="Recurring booking duration cannot exceed one week (occurrences would overlap each other)",
+        )
 
     occurrences = generate_weekly_occurrences(start_naive, end_naive, repeat_until)
 
@@ -195,13 +202,16 @@ def cancel_booking(db: Session, booking_id: int):
     if booking.status == "cancelled":
         raise HTTPException(status_code=409, detail="Booking is already cancelled")
 
-    now_iso = datetime.now().isoformat()
-
     if booking.series_id is None:
         # Single booking — cancel just this one
         booking.status = "cancelled"
         db.commit()
         return {"cancelled_count": 1}
+
+    # "Future" must be evaluated in the room's own local timezone, since stored
+    # timestamps are naive local (a Denver room compared against Berlin server
+    # time would be off by hours).
+    now_iso = datetime.now(ZoneInfo(booking.timezone)).replace(tzinfo=None).isoformat()
 
     # Recurring series — cancel all future instances (>= now), keep past ones
     future_bookings = (

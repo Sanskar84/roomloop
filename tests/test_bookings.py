@@ -390,3 +390,55 @@ def test_get_bookings_filter_by_series_id(client, room):
     filtered = client.get(f"/bookings?series_id={series_id}").json()
     assert len(filtered) == 4
     assert all(b["series_id"] == series_id for b in filtered)
+
+
+# ── Test 17: offset-bearing timestamps are rejected (C1 enforcement) ──────────
+
+def test_offset_timestamp_rejected(client, room):
+    """C1 requires naive local ISO strings. An offset-bearing timestamp must be
+    rejected, not silently stored (it would break the reporting job's parser
+    and corrupt naive string comparison)."""
+    r = book(client, room["id"], "2026-07-06T09:00:00+02:00", "2026-07-06T10:00:00+02:00")
+    assert r.status_code == 422
+
+
+# ── Test 18: short ISO forms are normalized before storage ────────────────────
+
+def test_short_iso_form_normalized(client, room):
+    """fromisoformat accepts '2026-07-06T09:00' (no seconds). Stored strings
+    must be normalized to full form or lexicographic conflict comparison breaks."""
+    rid = room["id"]
+    r = book(client, rid, "2026-07-06T09:00", "2026-07-06T10:00")
+    assert r.status_code == 201
+    assert r.json()["start_time"] == "2026-07-06T09:00:00"
+    assert r.json()["end_time"] == "2026-07-06T10:00:00"
+
+    # Conflict detection must still work against the normalized form
+    r2 = book(client, rid, "2026-07-06T09:30:00", "2026-07-06T10:30:00")
+    assert r2.status_code == 409
+
+
+# ── Test 19: recurring duration > 1 week rejected (self-overlap guard) ────────
+
+def test_recurring_duration_over_one_week_rejected(client, room):
+    """Occurrences are one week apart, so a duration longer than a week would
+    make the series' own instances overlap each other."""
+    r = book_recurring(
+        client, room["id"],
+        "2026-07-06T09:00:00", "2026-07-15T09:00:00",  # 9 days
+        "2026-08-31",
+    )
+    assert r.status_code == 422
+
+
+def test_recurring_exactly_one_week_duration_allowed(client, room):
+    """Exactly 7 days means each occurrence ends exactly when the next starts —
+    back-to-back, which is not a conflict per R4."""
+    r = book_recurring(
+        client, room["id"],
+        "2026-07-06T09:00:00", "2026-07-13T09:00:00",  # exactly 7 days
+        "2026-07-27",
+    )
+    assert r.status_code == 201
+    assert r.json()["created"] == 4
+    assert r.json()["skipped"] == 0

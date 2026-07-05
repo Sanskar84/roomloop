@@ -26,9 +26,16 @@ class BookingCreate(BaseModel):
 
     @field_validator("start_time", "end_time")
     @classmethod
-    def must_be_iso(cls, v: str) -> str:
-        datetime.fromisoformat(v)
-        return v
+    def must_be_naive_iso(cls, v: str) -> str:
+        parsed = datetime.fromisoformat(v)
+        if parsed.tzinfo is not None:
+            raise ValueError(
+                "timestamps must be naive local ISO strings without UTC offset, "
+                "e.g. 2026-07-02T09:00:00 (C1 reporting constraint)"
+            )
+        # Normalize (e.g. "2026-07-06T09:00" -> "2026-07-06T09:00:00") so stored
+        # strings compare correctly and match the C1 format exactly.
+        return parsed.replace(microsecond=0).isoformat()
 
 
 class BookingOut(BaseModel):
@@ -54,9 +61,14 @@ class RecurringBookingCreate(BaseModel):
 
     @field_validator("start_time", "end_time")
     @classmethod
-    def must_be_iso(cls, v: str) -> str:
-        datetime.fromisoformat(v)
-        return v
+    def must_be_naive_iso(cls, v: str) -> str:
+        parsed = datetime.fromisoformat(v)
+        if parsed.tzinfo is not None:
+            raise ValueError(
+                "timestamps must be naive local ISO strings without UTC offset, "
+                "e.g. 2026-07-02T09:00:00 (C1 reporting constraint)"
+            )
+        return parsed.replace(microsecond=0).isoformat()
 
 
 class RecurringBookingOut(BaseModel):

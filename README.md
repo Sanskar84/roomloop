@@ -10,7 +10,7 @@ Integration constraints in the brief describe two live HTTP consumers: a nightly
 
 ```bash
 cd roomloop
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate    # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
@@ -67,7 +67,7 @@ This creates 4 rooms (Aurora, Basalt, Cinder, Dune), several single bookings, a 
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/bookings` | List bookings (filters: room_id, user, status, from_date, to_date) |
+| GET | `/bookings` | List bookings (filters: room_id, user, status, series_id, from_date, to_date) |
 | POST | `/bookings` | Create a single booking |
 | POST | `/bookings/recurring` | Create a weekly recurring booking |
 | DELETE | `/bookings/{id}` | Cancel a booking (or whole future series) |
@@ -114,7 +114,8 @@ If the booking belongs to a recurring series, all *future* instances in that ser
 
 See [DECISIONS.md](DECISIONS.md) for full reasoning. Short summary:
 
-- **Timestamps stored as naive local ISO strings** — required by C1 (reporting job compatibility).
+- **Timestamps stored as naive local ISO strings** — required by C1 (reporting job compatibility). Offset-bearing timestamps (`+02:00`) are rejected with 422; short forms are normalized to `YYYY-MM-DDTHH:MM:SS`.
 - **DST / wall-clock recurrence** — weekly occurrences use `timedelta(weeks=1)` on naive local datetimes, not UTC arithmetic. This is the fix for the Denver "hour off" bug (R3).
 - **R1 vs R2** — ≤2 conflicting instances are skipped; the rest of the series is created. If >2 conflict the whole series is aborted (nothing saved).
-- **SQLite** — zero-config, swap to Postgres via one `DATABASE_URL` change.
+- **No double-booking under concurrency** — SQLite transactions use `BEGIN IMMEDIATE`, so the conflict check and insert run under the write lock. Two simultaneous booking requests cannot both pass the conflict check.
+- **SQLite** — zero-config, swap to Postgres via one `DATABASE_URL` change (would then need an exclusion constraint for the concurrency guarantee — see DECISIONS.md).
