@@ -9,6 +9,7 @@ Integration constraints in the brief describe two live HTTP consumers: a nightly
 ## Setup
 
 ```bash
+git clone https://github.com/Sanskar84/roomloop.git
 cd roomloop
 python3 -m venv .venv
 source .venv/bin/activate    # Windows: .venv\Scripts\activate
